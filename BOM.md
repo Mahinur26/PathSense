@@ -1,0 +1,8 @@
+- l298n motor
+- Greartisan DC 12V 200RPM Gear Motor
+- Crazepony 11.1V Airsoft Battery Rechargeable 3S LiPo 2000mAh 
+- XIAO_ESP32S3
+- Switch
+- M4 Screws + M4 Heat inserts
+- Omni Wheel
+- Voltage Dropper
