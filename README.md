@@ -18,6 +18,8 @@ On top of that there's GPS turn-by-turn navigation, a Vapi voice assistant you c
 - ESP32 microcontroller in the cane handle
 - Two vibration motors wired to the ESP32
 
+<img width="3000" height="2134" alt="image" src="https://github.com/user-attachments/assets/74287c2c-4e38-44c2-84e0-4016cca0c95b" />
+
 The app pairs to the ESP32 over BLE using custom service/characteristic UUIDs. Once connected it streams a continuous steering value (`-1.0` to `+1.0`) and a motor intensity byte.
 
 ---
