@@ -11,7 +11,7 @@ import UIKit
 import CoreVideo
 import Accelerate
 
-class DepthVisualizer {
+class DepthVisualizer: @unchecked Sendable {
     // Detection range (extended for better visualization)
     private let minDepth: Float = 0.2  // meters
     private let maxDepth: Float = 3.0  // meters

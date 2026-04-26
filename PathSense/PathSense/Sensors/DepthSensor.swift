@@ -11,7 +11,7 @@ import Combine
 
 // Depth data structure
 struct DepthFrame {
-    let depthMap: CVPixelBuffer
+    let depthMap: CVPixelBuffer?  // nil on non-LiDAR devices
     let timestamp: TimeInterval
     let cameraTransform: simd_float4x4
     let capturedImage: CVPixelBuffer?  // RGB camera frame for object recognition
@@ -28,17 +28,19 @@ class DepthSensor: NSObject, ObservableObject {
         setupARSession()
     }
 
-    private func setupARSession() {
-        guard ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) else {
-            print("[DepthSensor] ERROR: LiDAR not supported on this device!")
-            return
-        }
+    let hasLiDAR = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
 
+    private func setupARSession() {
         arSession = ARSession()
         arSession?.delegate = self
 
-        // Configure for LiDAR depth
-        configuration.frameSemantics = .sceneDepth
+        if hasLiDAR {
+            configuration.frameSemantics = .sceneDepth
+            print("[DepthSensor] LiDAR available — enabling sceneDepth")
+        } else {
+            print("[DepthSensor] No LiDAR — running camera-only mode")
+        }
+
         configuration.planeDetection = [.horizontal, .vertical]
 
         // Optimize for real-time performance
@@ -46,7 +48,7 @@ class DepthSensor: NSObject, ObservableObject {
             .supportedVideoFormats
             .first { $0.framesPerSecond == 60 } ?? ARWorldTrackingConfiguration.supportedVideoFormats[0]
 
-        print("[DepthSensor] ARKit configured for LiDAR at \(configuration.videoFormat.framesPerSecond)fps")
+        print("[DepthSensor] ARKit configured at \(configuration.videoFormat.framesPerSecond)fps")
     }
 
     func start() {
@@ -63,16 +65,11 @@ class DepthSensor: NSObject, ObservableObject {
 // MARK: - ARSessionDelegate
 extension DepthSensor: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        // Extract scene depth (LiDAR)
-        guard let sceneDepth = frame.sceneDepth else {
-            return
-        }
-
         let depthFrame = DepthFrame(
-            depthMap: sceneDepth.depthMap,
+            depthMap: frame.sceneDepth?.depthMap,  // nil on non-LiDAR devices
             timestamp: frame.timestamp,
             cameraTransform: frame.camera.transform,
-            capturedImage: frame.capturedImage  // Capture RGB frame for object recognition
+            capturedImage: frame.capturedImage
         )
 
         // Publish on main thread (SwiftUI requirement)

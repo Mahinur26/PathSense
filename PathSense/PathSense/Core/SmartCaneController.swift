@@ -165,7 +165,7 @@ class PathSenseController: ObservableObject {
 
         // Initialize Vapi voice assistant
         // TODO: Replace with your Vapi public key
-        vapiManager = VapiManager(publicKey: "81547ebe-da3d-44c1-8063-020598a9316f")
+        vapiManager = VapiManager(publicKey: "ac295409-f81a-483e-a7b7-d0aa9f4c9c3c")
         print("[Controller] VapiManager initialized")
 
         // Subscribe to Vapi state changes
@@ -325,7 +325,7 @@ class PathSenseController: ObservableObject {
         navigationManager?.headingProvider.updateFromARKit(cameraTransform: frame.cameraTransform)
 
         // Store depth map and camera image for object detection and preview
-        latestDepthMap = frame.depthMap
+        latestDepthMap = frame.depthMap  // may be nil on non-LiDAR devices
         latestCameraImage = frame.capturedImage
 
         // Step 0: Classify terrain (throttled to ~3Hz for performance)
@@ -347,82 +347,55 @@ class PathSenseController: ObservableObject {
             }
         }
 
-        // Step 1: Detect obstacles in zones (pass orientation for coordinate transform)
-        // Pass terrain obstacles for merging (nil when debug mode is ON to disable steering impact)
-        guard let zones = obstacleDetector?.analyzeDepthFrame(
-            frame,
-            orientation: deviceOrientation,
-            terrainObstacles: terrainDebugMode ? nil : latestTerrainObstacles
-        ) else { return }
+        // Steps 1-4: LiDAR-dependent pipeline (skip on non-LiDAR devices)
+        if let depthMap = frame.depthMap {
+            // Step 1: Detect obstacles in zones
+            if let zones = obstacleDetector?.analyzeDepthFrame(
+                frame,
+                orientation: deviceOrientation,
+                terrainObstacles: terrainDebugMode ? nil : latestTerrainObstacles
+            ) {
+                leftDistance = zones.leftDistance
+                centerDistance = zones.centerDistance
+                rightDistance = zones.rightDistance
 
-        // Update UI
-        leftDistance = zones.leftDistance
-        centerDistance = zones.centerDistance
-        rightDistance = zones.rightDistance
+                // Step 2: Gap-seeking steering
+                if let steering = steeringEngine?.computeSteering(
+                    zones: zones,
+                    sensitivity: espBluetooth?.steeringSensitivity ?? 2.0,
+                    proximityExponent: espBluetooth?.proximityExponent ?? 0.6,
+                    closeFloor: espBluetooth?.closeFloor ?? 0.5
+                ) {
+                    var finalCommand = steering.command
+                    if let nav = navigationManager, nav.state.isActive {
+                        let navBias = nav.biasComputer.navBias
+                        let alpha = 1.0 - steering.confidence
+                        let beta: Float = 0.3
+                        finalCommand = max(-1.0, min(1.0, steering.command + navBias * beta * alpha))
+                    }
+                    steeringCommand = finalCommand
+                    gapDirection = zones.gapDirection
 
-        // Step 2: Gap-seeking steering — steer toward the clearest path
-        guard let steering = steeringEngine?.computeSteering(
-            zones: zones,
-            sensitivity: espBluetooth?.steeringSensitivity ?? 2.0,
-            proximityExponent: espBluetooth?.proximityExponent ?? 0.6,
-            closeFloor: espBluetooth?.closeFloor ?? 0.5
-        ) else { return }
+                    let mergedSteering = SteeringDecision(command: finalCommand, confidence: steering.confidence, reason: steering.reason)
+                    updateESPMotor(steering: mergedSteering, zones: zones)
 
-        // Step 2.5: Merge navigation bias (Layer 5 — obstacles always win)
-        var finalCommand = steering.command
-        if let nav = navigationManager, nav.state.isActive {
-            let navBias = nav.biasComputer.navBias
-            let alpha = 1.0 - steering.confidence  // 0 when obstacle close, 1 when clear
-            let beta: Float = 0.3                   // nav weight when path is clear
-            finalCommand = max(-1.0, min(1.0, steering.command + navBias * beta * alpha))
-        }
+                    let closestDistance = [zones.leftDistance, zones.centerDistance, zones.rightDistance]
+                        .compactMap { $0 }.min() ?? 2.0
+                    hapticManager?.updateDistance(closestDistance)
 
-        // Update UI
-        steeringCommand = finalCommand
-        gapDirection = zones.gapDirection
-
-        // Step 3: Send to ESP32 via 12-byte protocol
-        let mergedSteering = SteeringDecision(command: finalCommand, confidence: steering.confidence, reason: steering.reason)
-        updateESPMotor(steering: mergedSteering, zones: zones)
-
-        // Step 4: Update haptics based on closest obstacle
-        let closestDistance = [zones.leftDistance, zones.centerDistance, zones.rightDistance]
-            .compactMap { $0 }
-            .min() ?? 2.0
-
-        hapticManager?.updateDistance(closestDistance)
-
-        // Step 4.1: Send sensor data to Vapi voice assistant (if call active)
-        if isVapiCallActive {
-            let summary = buildSensorSummary(zones: zones, steering: steering)
-            vapiManager?.sendSensorUpdate(summary)
-
-            // Urgent alert for critical center obstacle
-            if let centerDist = zones.centerDistance, centerDist < 0.6 {
-                vapiManager?.sendUrgentAlert("Stop. Obstacle directly ahead at \(String(format: "%.1f", centerDist)) meters.")
+                    if isVapiCallActive {
+                        let summary = buildSensorSummary(zones: zones, steering: steering)
+                        vapiManager?.sendSensorUpdate(summary)
+                        if let centerDist = zones.centerDistance, centerDist < 0.6 {
+                            vapiManager?.sendUrgentAlert("Stop. Obstacle directly ahead at \(String(format: "%.1f", centerDist)) meters.")
+                        }
+                    }
+                }
             }
-        }
 
-        // Step 4.5: Generate depth visualization if enabled (non-blocking)
-        if showDepthVisualization && !isVisualizationInProgress {
-            isVisualizationInProgress = true
-
-            // Run on background thread to avoid blocking steering pipeline
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self = self,
-                      let visualizer = self.depthVisualizer else {
-                    self?.isVisualizationInProgress = false
-                    return
-                }
-
-                // Generate visualization with current orientation
-                let image = visualizer.visualize(depthMap: frame.depthMap, orientation: self.deviceOrientation)
-
-                // Update UI on main thread
-                DispatchQueue.main.async {
-                    self.depthVisualization = image
-                    self.isVisualizationInProgress = false
-                }
+            // Step 4.5: Depth visualization (main thread — acceptable for demo)
+            if showDepthVisualization {
+                depthVisualization = depthVisualizer?.visualize(depthMap: depthMap, orientation: deviceOrientation)
             }
         }
 

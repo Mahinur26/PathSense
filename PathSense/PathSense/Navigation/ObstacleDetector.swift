@@ -86,8 +86,8 @@ class ObstacleDetector {
         }
     }
 
-    func analyzeDepthFrame(_ frame: DepthFrame, orientation: UIDeviceOrientation = .portrait, terrainObstacles: TerrainObstacles? = nil) -> ObstacleZones {
-        let depthMap = frame.depthMap
+    func analyzeDepthFrame(_ frame: DepthFrame, orientation: UIDeviceOrientation = .portrait, terrainObstacles: TerrainObstacles? = nil) -> ObstacleZones? {
+        guard let depthMap = frame.depthMap else { return nil }
 
         // Lock pixel buffer for reading
         CVPixelBufferLockBaseAddress(depthMap, .readOnly)

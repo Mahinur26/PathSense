@@ -28,7 +28,7 @@ class VapiManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     // Vapi assistant configuration
-    private let assistantId = "2c5e8893-65df-4bea-987f-84ea6a0f236f"
+    private let assistantId = "47c9831b-5a73-44b9-b400-76f15a63cecb"
 
     // controlUrl base (Vapi's WebRTC control endpoint)
     private let controlUrlBase = "https://aws-us-west-2-production1-phone-call-websocket.vapi.ai"
